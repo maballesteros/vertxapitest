@@ -3,9 +3,9 @@ vertxapitest
 
 Test project for building a REST Api server with Vertx and Scala
 
-# Demo
+## Demo
 
-First run the RESR API server:
+First run the REST API server:
 
 ```
 mvn exec:java
@@ -25,3 +25,25 @@ Now add a user and retrieve it!:
 curl -H "Content-Type: application/json" -d '{"id":"charles","fname":"Carlos","lname":"Ballesteros Velasco"}' http://localhost:8080/users
 curl http://localhost:8080/users/charles
 ```
+
+## Routing made simple
+
+Note how easy is to route REST calls and map them to Scala case classes:
+
+```
+    GET[UserIdParams, User]("/users/:userId")(
+      (ur, ok) => ok(UserRepo.get(ur.userId))
+    )
+
+    POST[EmptyParams, User, User]("/users")(
+      (er, user, ok) => {
+        UserRepo.put(user)
+        ok(user)
+    })
+```
+
+`GET` and `POST` are parametrizable `VertxRest` object methods that:
+
+ - map URL params and reques body to case classes
+ - call your function, with the mapped objects and a "success" (`ok` in the example) function when the async work is done
+ - serialize your response object into a JSON REST response
