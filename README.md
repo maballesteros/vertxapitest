@@ -8,7 +8,7 @@ Test project for building a REST Api server with Vertx and Scala
 First run the REST API server:
 
 ```
-mvn exec:java
+mvn compile exec:java
 ```
 
 Note that the first time it will take longer because Vertx-Scala module has to be downloaded.
