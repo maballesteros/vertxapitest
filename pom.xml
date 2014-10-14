@@ -11,7 +11,7 @@
 		<encoding>UTF-8</encoding>
 		<scala.tools.version>2.10</scala.tools.version>
 		<scala.version>2.10.4</scala.version>
-		<vertx.version>2.1.1</vertx.version>
+		<vertx.version>2.1.2</vertx.version>
 	</properties>
 
 	<dependencies>
@@ -38,6 +38,11 @@
 			<artifactId>mysql-async_2.10</artifactId>
 			<version>0.2.15</version>
 		</dependency>
+		<dependency>
+			<groupId>com.github.mauricio</groupId>
+			<artifactId>postgresql-async_2.10</artifactId>
+			<version>0.2.15</version>
+		</dependency>		
 
 		<!--Vertx provided dependencies -->
 		<dependency>

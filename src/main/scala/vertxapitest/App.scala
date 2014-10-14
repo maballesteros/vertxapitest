@@ -1,13 +1,11 @@
 package vertxapitest
 
-import org.vertx.scala.platform.Verticle
-import scala.util.Failure
-import scala.util.Success
+import scala.async.Async.async
+import scala.async.Async.await
 import scala.concurrent.Future
+
 import org.vertx.scala.core.VertxExecutionContext
-import scala.concurrent._
-import ExecutionContext.Implicits.global
-import scala.async.Async.{ async, await }
+import org.vertx.scala.platform.Verticle
 
 /**
  * Main app. Just init a Vertx app, providing the verticles to start
@@ -23,11 +21,12 @@ object App {
  */
 case class EmptyParams()
 case class UserIdParams(userId: String)
+case class User(id: String, fname: String, lname: String)
 
 class ApiServer extends ApiVerticle(9090) {
 
-  lazy val db = new DatabaseAsync(this)  // lazy it's important because
-  lazy val userRepo = new UserRepo(db)
+  lazy val db = new DatabaseAsync(this, "mysql", 5, "test", "pwd", 3306, "test") // lazy it's important because verticle is not initialized at construction time
+  lazy val userRepo = new UserRepo(db, this)
 
   GET[UserIdParams, User]("/users/:userId") { params => userRepo.getAsync(params.userId) }
 
@@ -35,21 +34,16 @@ class ApiServer extends ApiVerticle(9090) {
 
 }
 
-/**
- *  User case class and repo for memory storage
- */
-case class User(id: String, fname: String, lname: String)
-
-class UserRepo(db: DatabaseAsync) {
-
-  val futConnection = db.connect("test", "pwd", 3306, "test")
+class UserRepo(db: DatabaseAsync, verticle: Verticle) {
+  implicit val context = VertxExecutionContext.fromVertxAccess(verticle)
 
   def getAsync(userId: String): Future[User] = async {
-    val usersList = await(db.queryAsync[User](futConnection, "select * from test.users where id='" + userId + "'"))
+    val usersList = await(db.queryAsync[User]("select * from test.users where id='" + userId + "'"))
     usersList.head
   }
 
-  def putAsync(user: User): Future[User] = {
-    future(user)
+  def putAsync(user: User): Future[User] = async {
+    val insertedRows = await(db.executeAsync(s"insert into users values ('${user.id}', '${user.fname}', '${user.lname}')"))
+    user
   }
 }

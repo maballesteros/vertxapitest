@@ -21,51 +21,37 @@ import com.google.gson.Gson
 import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.Success
+import scala.async.Async.{ async, await }
 
 /**
  * Helper class to do async DB access and mapping to case clases
  */
-class DatabaseAsync(verticle: Verticle) {
-
-  val executionContext = VertxExecutionContext.fromVertxAccess(verticle)
-
-  def connect(username: String, password: String, port: Int, database: String): Future[Connection] = {
-    try {
-      new MySQLConnection(
-        Configuration(username = username, port = port, password = Option(password), database = Option(database)),
-        group = verticle.vertx.asJava.currentContext().asInstanceOf[EventLoopContext].getEventLoop(),
-        executionContext = executionContext).connect
-    } catch {
-      case t: Throwable => t.printStackTrace(); null
-    }
-  }
+class DatabaseAsync(verticle: Verticle, databaseType:String, poolSize: Int, username: String, password: String, port: Int, database: String) {
 
   import scala.concurrent._
 
-  def queryAsync[T](futConnection: Future[Connection], sql: String)(implicit t: Manifest[T]): Future[List[T]] = {
-    implicit val context = executionContext
-    try {
-      val out = for {
-        con <- futConnection
-        queryRes <- con.sendQuery(sql)
-      } yield {
-        val rs = queryRes.rows.get
+  val executionContext = VertxExecutionContext.fromVertxAccess(verticle)
 
-        try {
-          var data: List[T] = rs.map(rd => {
-            ReflectionUtils.instantiate[T](f => rd(f.getName).asInstanceOf[AnyRef]).asInstanceOf[T]
-          }).toList
-          data
-        } catch {
-          case t: Throwable => {
-            t.printStackTrace()
-            Nil
-          }
-        }
-      }
-      out
-    } catch {
-      case t => t.printStackTrace(); future(List())
-    }
-  }
+  val configuration = Configuration(username = username, port = port, password = Option(password), database = Option(database))
+
+  val pool = db.AsyncConnectionPool(verticle, databaseType, poolSize, configuration)
+
+  def queryAsync[T](sql: String)(implicit t: Manifest[T]): Future[List[T]] =
+    pool.withConnection(con => {
+      async {
+        val queryResult = await(con.sendQuery(sql))
+        queryResult.rows.get.map(rd => {
+          ReflectionUtils.instantiate[T](f => rd(f.getName).asInstanceOf[AnyRef]).asInstanceOf[T]
+        }).toList
+      }(executionContext)
+    })
+
+  def executeAsync(sql: String): Future[Long] =
+    pool.withConnection(con => {
+      async {
+        val queryResult = await(con.sendQuery(sql))
+        queryResult.rowsAffected
+      }(executionContext)
+    })
+
 }
