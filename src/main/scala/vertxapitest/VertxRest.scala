@@ -22,6 +22,9 @@ import scala.concurrent.Future
 import scala.util.Failure
 import scala.util.Success
 
+/**
+ * Helper object to start Vertx
+ */
 object VertxApp {
 
   def start(serverClass: Class[_]) = {
@@ -32,39 +35,47 @@ object VertxApp {
 
 }
 
-object VertxRest {
+/**
+ * Absctract API verticle that provided convenience methods for REST API publishing
+ */
+abstract class ApiVerticle(port: Int) extends Verticle {
 
-  val routeMatcher = RouteMatcher()
-
+  implicit val context = VertxExecutionContext.fromVertxAccess(this)
+  private val routeMatcher = RouteMatcher()
   private val gson = new Gson()
 
-  def startRestServer(vertx: Vertx, port: Int) = {
+  override def start() {
     vertx.createHttpServer()
       .setCompressionSupported(true)
       .requestHandler(routeMatcher)
       .listen(port, "localhost")
+    println("Created Api at " + port)
   }
 
-  def GET[P, R](pattern: String)(func: (P, (R => Unit)) => Unit)(implicit t: Manifest[P]): Unit = {
+  def GET[P, R](pattern: String)(func: P => Future[R])(implicit t: Manifest[P]): Unit = {
     routeMatcher.get(pattern, (req: HttpServerRequest) => {
-      func(parseRequestParams[P](req).asInstanceOf[P], (res: R) => req.response.putHeader("Content-type", "application/json").end(toJson(res)))
+      func(parseRequestParams[P](req).asInstanceOf[P]).map(res => {
+        req.response.putHeader("Content-type", "application/json").end(toJson(res))
+      })(context)
     })
   }
 
-  def POST[P, R](pattern: String)(func: (P, (R => Unit)) => Unit)(implicit t: Manifest[P]): Unit = {
+  def POST[P, R](pattern: String)(func: P => Future[R])(implicit t: Manifest[P]): Unit = {
     routeMatcher.post(pattern, (req: HttpServerRequest) => {
       req.bodyHandler({ body: Buffer =>
-        func(parseRequestParams[P](req).asInstanceOf[P],
-          (res: R) => req.response.putHeader("Content-type", "application/json").end(toJson(res)))
+        func(parseRequestParams[P](req).asInstanceOf[P]).map(res => {
+          req.response.putHeader("Content-type", "application/json").end(toJson(res))
+        })(context)
       })
     })
   }
 
-  def POST[P, B, R](pattern: String)(func: (P, B, (R => Unit)) => Unit)(implicit p: Manifest[P], b: Manifest[B]): Unit = {
+  def POST[P, B, R](pattern: String)(func: (P, B) => Future[R])(implicit p: Manifest[P], b: Manifest[B]): Unit = {
     routeMatcher.post(pattern, (req: HttpServerRequest) => {
       req.bodyHandler({ body: Buffer =>
-        func(parseRequestParams[P](req).asInstanceOf[P], fromJson(body.toString, b.erasure).asInstanceOf[B],
-          (res: R) => req.response.putHeader("Content-type", "application/json").end(toJson(res)))
+        func(parseRequestParams[P](req).asInstanceOf[P], fromJson(body.toString, b.erasure).asInstanceOf[B]).map(res => {
+          req.response.putHeader("Content-type", "application/json").end(toJson(res))
+        })(context)
       })
     })
   }
@@ -80,6 +91,57 @@ object VertxRest {
   }
 }
 
+/**
+ * Helper class to do async DB access and mapping to case clases
+ */
+class DatabaseAsync(verticle: Verticle) {
+
+  val executionContext = VertxExecutionContext.fromVertxAccess(verticle)
+
+  def connect(username: String, password: String, port: Int, database: String): Future[Connection] = {
+    try {
+      new MySQLConnection(
+        Configuration(username = username, port = port, password = Option(password), database = Option(database)),
+        group = verticle.vertx.asJava.currentContext().asInstanceOf[EventLoopContext].getEventLoop(),
+        executionContext = executionContext).connect
+    } catch {
+      case t: Throwable => t.printStackTrace(); null
+    }
+  }
+
+  import scala.concurrent._
+
+  def queryAsync[T](futConnection: Future[Connection], sql: String)(implicit t: Manifest[T]): Future[List[T]] = {
+    implicit val context = executionContext
+    try {
+      val out = for {
+        con <- futConnection
+        queryRes <- con.sendQuery(sql)
+      } yield {
+        val rs = queryRes.rows.get
+
+        try {
+          var data: List[T] = rs.map(rd => {
+            Instantiator.instantiate[T](f => rd(f.getName) match { case null => null; case x => x.toString }).asInstanceOf[T]
+          }).toList
+          data
+        } catch {
+          case t: Throwable => {
+            t.printStackTrace()
+            Nil
+          }
+        }
+      }
+      out
+    } catch {
+      case t => t.printStackTrace(); future(List())
+    }
+  }
+}
+
+/**
+ * Helper class for instantiate case classes
+ */
 object Instantiator {
 
   def instantiate[T](f: Field => String)(implicit t: Manifest[T]) = {
@@ -88,42 +150,5 @@ object Instantiator {
     //println("Calling constructor", cons(0) ," with: ", consArgs.toList)
     val instance = cons(0).newInstance(consArgs.toArray: _*)
     instance
-  }
-}
-
-class Db(verticle: Verticle) {
-
-  val executionContext = VertxExecutionContext.fromVertxAccess(verticle)
-
-  def connect(username: String, password: String, port: Int, database: String): Future[Connection] = {
-    new MySQLConnection(
-      Configuration(username = username, port = port, password = Option(password), database = Option(database)),
-      group = verticle.vertx.asJava.currentContext().asInstanceOf[EventLoopContext].getEventLoop(),
-      executionContext = executionContext).connect
-  }
-
-  import scala.concurrent._
-
-  def query[T](futConnection: Future[Connection], sql: String)(implicit t: Manifest[T]): Future[List[T]] = {
-    implicit val context = executionContext
-    val out = for {
-      con <- futConnection
-      queryRes <- con.sendQuery(sql)
-    } yield {
-      val rs = queryRes.rows.get
-
-      try {
-        var data: List[T] = rs.map(rd => {
-          Instantiator.instantiate[T](f => rd(f.getName) match { case null => null; case x => x.toString }).asInstanceOf[T]
-        }).toList
-        data
-      } catch {
-        case t: Throwable => {
-          t.printStackTrace()
-          Nil
-        }
-      }
-    }
-    out
   }
 }
