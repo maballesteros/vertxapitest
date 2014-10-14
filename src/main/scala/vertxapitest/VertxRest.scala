@@ -87,68 +87,7 @@ abstract class ApiVerticle(port: Int) extends Verticle {
   private def responseJson(req: HttpServerRequest, any: Any) = req.response().end(toJson(any))
 
   private def parseRequestParams[T](req: HttpServerRequest)(implicit t: Manifest[T]): Any = {
-    Instantiator.instantiate[T](f => req.params.get(f.getName).get.headOption.get)
+    ReflectionUtils.instantiate[T](f => req.params.get(f.getName).get.headOption.get)
   }
 }
 
-/**
- * Helper class to do async DB access and mapping to case clases
- */
-class DatabaseAsync(verticle: Verticle) {
-
-  val executionContext = VertxExecutionContext.fromVertxAccess(verticle)
-
-  def connect(username: String, password: String, port: Int, database: String): Future[Connection] = {
-    try {
-      new MySQLConnection(
-        Configuration(username = username, port = port, password = Option(password), database = Option(database)),
-        group = verticle.vertx.asJava.currentContext().asInstanceOf[EventLoopContext].getEventLoop(),
-        executionContext = executionContext).connect
-    } catch {
-      case t: Throwable => t.printStackTrace(); null
-    }
-  }
-
-  import scala.concurrent._
-
-  def queryAsync[T](futConnection: Future[Connection], sql: String)(implicit t: Manifest[T]): Future[List[T]] = {
-    implicit val context = executionContext
-    try {
-      val out = for {
-        con <- futConnection
-        queryRes <- con.sendQuery(sql)
-      } yield {
-        val rs = queryRes.rows.get
-
-        try {
-          var data: List[T] = rs.map(rd => {
-            Instantiator.instantiate[T](f => rd(f.getName) match { case null => null; case x => x.toString }).asInstanceOf[T]
-          }).toList
-          data
-        } catch {
-          case t: Throwable => {
-            t.printStackTrace()
-            Nil
-          }
-        }
-      }
-      out
-    } catch {
-      case t => t.printStackTrace(); future(List())
-    }
-  }
-}
-
-/**
- * Helper class for instantiate case classes
- */
-object Instantiator {
-
-  def instantiate[T](f: Field => String)(implicit t: Manifest[T]) = {
-    val consArgs = t.erasure.getDeclaredFields().filter(f => f.getName().charAt(0) != '$').map(f)
-    val cons = t.erasure.getConstructors()
-    //println("Calling constructor", cons(0) ," with: ", consArgs.toList)
-    val instance = cons(0).newInstance(consArgs.toArray: _*)
-    instance
-  }
-}
