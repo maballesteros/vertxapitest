@@ -1,6 +1,8 @@
 package vertxapitest
 
 import org.vertx.scala.platform.Verticle
+import scala.util.Failure
+import scala.util.Success
 
 
 /**
@@ -36,14 +38,24 @@ object UserRepo {
 case class EmptyParams()
 case class UserIdParams(userId: String)
 
+
+
 class ApiServer extends Verticle {
 
   override def start() {
 
     import VertxRest._
+    
+    val db = new Db(this)
+    
+    val futConnection = db.connect("test", "pwd", 3306, "test")
 
     GET[UserIdParams, User]("/users/:userId")(
-      (ur, ok) => ok(UserRepo.get(ur.userId))
+      (ur, ok) => {
+        db.query[User](futConnection, "select * from test.users where id='"+ur.userId+"'").map{users =>
+          ok(users.head)
+        }
+      }
     )
 
     POST[EmptyParams, User, User]("/users")(
@@ -51,8 +63,12 @@ class ApiServer extends Verticle {
         UserRepo.put(user)
         ok(user)
     })
+    
+    db.query[User](futConnection, "select * from test.users").map(users => println("USERS: " + users))
+    
+    println("Sent query!")
 
-    val port = 8080
+    val port = 9090
     startRestServer(vertx, port)
     println("Created server at " + port)
   }
