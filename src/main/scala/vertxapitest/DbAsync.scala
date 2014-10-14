@@ -26,7 +26,7 @@ import scala.async.Async.{ async, await }
 /**
  * Helper class to do async DB access and mapping to case clases
  */
-class DatabaseAsync(verticle: Verticle, databaseType:String, poolSize: Int, username: String, password: String, port: Int, database: String) {
+class DatabaseAsync(val verticle: Verticle, databaseType:String, poolSize: Int, username: String, password: String, port: Int, database: String) {
 
   import scala.concurrent._
 
@@ -41,7 +41,11 @@ class DatabaseAsync(verticle: Verticle, databaseType:String, poolSize: Int, user
       async {
         val queryResult = await(con.sendQuery(sql))
         queryResult.rows.get.map(rd => {
-          ReflectionUtils.instantiate[T](f => rd(f.getName).asInstanceOf[AnyRef]).asInstanceOf[T]
+          try {
+        	  ReflectionUtils.instantiate[T](f => rd(f.getName).asInstanceOf[AnyRef]).asInstanceOf[T]
+          } catch {
+            case t => t.printStackTrace(); None.asInstanceOf[T]
+          }
         }).toList
       }(executionContext)
     })
@@ -54,4 +58,10 @@ class DatabaseAsync(verticle: Verticle, databaseType:String, poolSize: Int, user
       }(executionContext)
     })
 
+}
+
+
+trait DAO {
+  val db: DatabaseAsync
+  implicit val context = VertxExecutionContext.fromVertxAccess(db.verticle)
 }
