@@ -30,6 +30,8 @@ class ApiServer extends ApiVerticle(9090) {
 
   GET[UserIdParams, User]("/users/:userId") { params => userRepo.getAsync(params.userId) }
 
+  DELETE[UserIdParams]("/users/:userId") { params => userRepo.deleteAsync(params.userId) }
+
   POST[EmptyParams, User, User]("/users") { (params, user) => userRepo.putAsync(user) }
 
 }
@@ -38,12 +40,17 @@ class UserRepo(db: DatabaseAsync, verticle: Verticle) {
   implicit val context = VertxExecutionContext.fromVertxAccess(verticle)
 
   def getAsync(userId: String): Future[User] = async {
-    val usersList = await(db.queryAsync[User]("select * from test.users where id='" + userId + "'"))
+    val usersList = await(db.queryAsync[User](s"select * from test.users where id='$userId'"))
     usersList.head
   }
 
   def putAsync(user: User): Future[User] = async {
     val insertedRows = await(db.executeAsync(s"insert into users values ('${user.id}', '${user.fname}', '${user.lname}')"))
     user
+  }
+
+  def deleteAsync(userId: String): Future[Boolean] = async {
+    val insertedRows = await(db.executeAsync(s"delete from test.users where id='$userId'"))
+    insertedRows > 0
   }
 }

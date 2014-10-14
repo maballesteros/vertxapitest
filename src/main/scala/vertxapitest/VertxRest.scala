@@ -48,7 +48,7 @@ abstract class ApiVerticle(port: Int) extends Verticle {
     vertx.createHttpServer()
       .setCompressionSupported(true)
       .requestHandler(routeMatcher)
-      .listen(port, "localhost")
+      .listen(port, "0.0.0.0")
     println("Created Api at " + port)
   }
 
@@ -56,6 +56,14 @@ abstract class ApiVerticle(port: Int) extends Verticle {
     routeMatcher.get(pattern, (req: HttpServerRequest) => {
       func(parseRequestParams[P](req).asInstanceOf[P]).map(res => {
         req.response.putHeader("Content-type", "application/json").end(toJson(res))
+      })(context)
+    })
+  }
+
+  def DELETE[P](pattern: String)(func: P => Future[Boolean])(implicit t: Manifest[P]): Unit = {
+    routeMatcher.delete(pattern, (req: HttpServerRequest) => {
+      func(parseRequestParams[P](req).asInstanceOf[P]).map(res => {
+        req.response.end()
       })(context)
     })
   }
